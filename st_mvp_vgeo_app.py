@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import random 
 import io
+from pymilvus import MilvusClient
 
 from datetime import datetime, timedelta
 from gdeltdoc import Filters, near, repeat, GdeltDoc
@@ -36,6 +37,8 @@ os.environ['GOOGLE_API_KEY']= r'AIzaSyAlbksrD6rQFyaf79BgCBrZ5eWGnGiT4as'
 os.environ['ZILLIZ_CLOUD_URI']= r'https://in03-8d51ecc9c616de5.serverless.gcp-us-west1.cloud.zilliz.com'
 os.environ['ZILLIZ_CLOUD_USERNAME']= r'db_8d51ecc9c616de5'
 os.environ['ZILLIZ_CLOUD_PASSWORD']= r'Sj6?Em|q>WLn-y,0'
+os.environ['ZILLIZ_CLOUD_API_KEY']= r'5e2dd8ac6c7ff07f12d024e7ea54e16dac4011de21ff7680270d5b0acac07b11e02461544b316dc28d6d51a8b16d1f24d6dc8022'
+
 
 if "scraped_once" not in st.session_state:
     st.session_state.scraped_once = False
@@ -119,7 +122,6 @@ def search_gdelt_queries(q):
     articles_df = articles_df[articles_df['language'] == "English"]
     articles_df = articles_df[~articles_df['url'].str.contains('chinadaily|larouchepub|yahoo|jdsupra|sandiegosun|eurasiareview|insidenova|gdnonline|clutchfans|tomsguide|fool', case=False, na=False)]
     articles_df = articles_df.reset_index(drop=True)
-    # articles_df.to_excel(export_path, index= False)
 
     return articles_df
 
@@ -407,9 +409,11 @@ if proceed_with_scraping == "Yes" and st.session_state.scraped_once == False:
         url_list = df['url'].tolist()
 
         # Run async scraping
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        scrape_results = loop.run_until_complete(scrape_multiple(url_list))
+        scrape_results = asyncio.run(scrape_multiple(url_list))
+
+        # loop = asyncio.new_event_loop()
+        # asyncio.set_event_loop(loop)
+        # scrape_results = loop.run_until_complete(scrape_multiple(url_list))
         print("cleaning...")
         cleaned_results = clean_multiple(scrape_results)
         print("done cleaning...")
@@ -452,9 +456,15 @@ if visualized == True:
         "secure": True,
     }
     
-    timestamp = datetime.now().strftime("%Y%m%d%H%M")
+    client = MilvusClient(
+        uri=os.getenv("ZILLIZ_CLOUD_URI"),
+        token=os.getenv("ZILLIZ_CLOUD_API_KEY")
+    )
+    client.drop_collection(
+        collection_name="LangChainCollection"
+    )
     # Store in Milvus/Zilliz
-    vector_db = Milvus.from_documents(all_docs, embeddings, collection_name= f"LangChainCollection_{timestamp}",connection_args=connection_args)
+    vector_db = Milvus.from_documents(all_docs, embeddings, collection_name= f"LangChainCollection",connection_args=connection_args)
 
 if vector_db is not None:
     vector_search_query = st.text_area("Enter Vector Search Query", "")
