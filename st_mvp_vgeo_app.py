@@ -13,16 +13,32 @@ from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
 import asyncio
 import threading
 
-def run_async_in_thread(coro):
-    result = []
-    def target():
-        # asyncio.run creates a new event loop, runs the coroutine, and then closes the loop.
-        res = asyncio.run(coro)
-        result.append(res)
-    thread = threading.Thread(target=target)
-    thread.start()
-    thread.join()
-    return result[0]
+def run_async_task(async_func, *args):
+    """
+    Run an asynchronous function in a new event loop.
+    
+    Args:
+        async_func (coroutine): The asynchronous function to execute.
+        *args: Arguments to pass to the asynchronous function.
+    
+    Returns:
+        The result of the asynchronous function.
+    """
+    loop = None
+    result = None
+    try:
+        loop = asyncio.new_event_loop()
+        result = loop.run_until_complete(async_func(*args))
+    except Exception as e:
+        if loop is not None:
+            loop.close()
+        loop = asyncio.new_event_loop()
+        result = loop.run_until_complete(async_func(*args))
+    finally:
+        if loop is not None:
+            loop.close()
+    return result
+
 
 # from langchain.document_loaders import UnstructuredMarkdownParser
 from langchain.schema import Document
@@ -422,7 +438,8 @@ if proceed_with_scraping == "Yes" and st.session_state.scraped_once == False:
         url_list = df['url'].tolist()
 
         # Run async scraping using the existing event loop with nest_asyncio applied.
-        scrape_results = run_async_in_thread(scrape_multiple(url_list))
+        # scrape_results = run_async_in_thread(scrape_multiple(url_list))
+        scrape_results = run_async_task(scrape_multiple, url_list)
 
         # scrape_results = asyncio.get_event_loop().run_until_complete(scrape_multiple(url_list))
         
