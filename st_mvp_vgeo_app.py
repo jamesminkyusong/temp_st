@@ -143,9 +143,34 @@ async def scrape_url(url):
     except:
         return None
     
-import nest_asyncio
+import asyncio
+import threading
 
-nest_asyncio.apply()
+def run_async_task(coro):
+    """
+    Run an async coroutine in a dedicated thread with its own event loop.
+    Returns the result of the coroutine.
+    """
+    result_container = {"result": None, "exception": None}
+    
+    def runner():
+        try:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            result_container["result"] = loop.run_until_complete(coro)
+        except Exception as e:
+            result_container["exception"] = e
+        finally:
+            loop.close()
+    
+    thread = threading.Thread(target=runner)
+    thread.start()
+    thread.join()
+    
+    if result_container["exception"]:
+        raise result_container["exception"]
+    return result_container["result"]
+
 
 async def scrape_multiple(url_list):
     results = []
@@ -409,7 +434,9 @@ if proceed_with_scraping == "Yes" and st.session_state.scraped_once == False:
         url_list = df['url'].tolist()
 
         # Run async scraping
-        scrape_results = asyncio.run(scrape_multiple(url_list))
+        # scrape_results = asyncio.run(scrape_multiple(url_list))
+        scrape_results = run_async_task(scrape_multiple(url_list))
+        print(scrape_results)
 
         # loop = asyncio.new_event_loop()
         # asyncio.set_event_loop(loop)
