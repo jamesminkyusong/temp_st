@@ -11,33 +11,28 @@ from datetime import datetime, timedelta
 from gdeltdoc import Filters, near, repeat, GdeltDoc
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
 import asyncio
-import threading
+import multiprocessing
 
-def run_async_task(async_func, *args):
+def async_task_runner(url_list, queue):
     """
-    Run an asynchronous function in a new event loop.
-    
-    Args:
-        async_func (coroutine): The asynchronous function to execute.
-        *args: Arguments to pass to the asynchronous function.
-    
-    Returns:
-        The result of the asynchronous function.
+    Create a new event loop, run the async function, and put the result in a queue.
     """
-    loop = None
-    result = None
     try:
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(async_func(*args))
+        result = asyncio.run(scrape_multiple(url_list))
+        queue.put(result)
     except Exception as e:
-        if loop is not None:
-            loop.close()
-        loop = asyncio.new_event_loop()
-        result = loop.run_until_complete(async_func(*args))
-    finally:
-        if loop is not None:
-            loop.close()
-    return result
+        queue.put(None)
+
+def run_async_task_process(url_list):
+    """
+    Run the async task in a separate process and return its result.
+    """
+    q = multiprocessing.Queue()
+    p = multiprocessing.Process(target=async_task_runner, args=(url_list, q))
+    p.start()
+    p.join()
+    return q.get()
+
 
 
 # from langchain.document_loaders import UnstructuredMarkdownParser
@@ -439,7 +434,7 @@ if proceed_with_scraping == "Yes" and st.session_state.scraped_once == False:
 
         # Run async scraping using the existing event loop with nest_asyncio applied.
         # scrape_results = run_async_in_thread(scrape_multiple(url_list))
-        scrape_results = run_async_task(scrape_multiple, url_list)
+        scrape_results = run_async_task_process(url_list)
 
         # scrape_results = asyncio.get_event_loop().run_until_complete(scrape_multiple(url_list))
         
