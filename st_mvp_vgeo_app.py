@@ -11,6 +11,8 @@ from datetime import datetime, timedelta
 from gdeltdoc import Filters, near, repeat, GdeltDoc
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
 import asyncio
+import nest_asyncio 
+nest_asyncio.apply()
 
 # from langchain.document_loaders import UnstructuredMarkdownParser
 from langchain.schema import Document
@@ -118,6 +120,7 @@ def search_gdelt_queries(q):
     articles_df = articles_df.drop_duplicates(subset='url')
     articles_df['title_norm'] = articles_df['title'].apply(lambda x: remove_non_english(x.lower()))
     articles_df = articles_df.drop_duplicates(subset= 'title_norm')
+
     articles_df = articles_df[articles_df['language'] == "English"]
     articles_df = articles_df[~articles_df['url'].str.contains('chinadaily|larouchepub|yahoo|jdsupra|sandiegosun|eurasiareview|insidenova|gdnonline|clutchfans|tomsguide|fool', case=False, na=False)]
     articles_df = articles_df.reset_index(drop=True)
@@ -137,47 +140,22 @@ async def scrape_url(url):
     try:
         async with AsyncWebCrawler() as crawler:
             result = await crawler.arun(url=url, config=config)
-            if result != None and len(result.markdown) < 300:
+            if result is not None and len(result.markdown) < 300:
                 result = None
             return result
     except:
         return None
-    
-import asyncio
-import threading
-
-def run_async_task(coro):
-    """
-    Run an async coroutine in a dedicated thread with its own event loop.
-    Returns the result of the coroutine.
-    """
-    result_container = {"result": None, "exception": None}
-    
-    def runner():
-        try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            result_container["result"] = loop.run_until_complete(coro)
-        except Exception as e:
-            result_container["exception"] = e
-        finally:
-            loop.close()
-    
-    thread = threading.Thread(target=runner)
-    thread.start()
-    thread.join()
-    
-    if result_container["exception"]:
-        raise result_container["exception"]
-    return result_container["result"]
-
 
 async def scrape_multiple(url_list):
     results = []
     for url in url_list:
         result = await scrape_url(url)
-        results.append(result)
+        if result is not None:
+            results.append([result.markdown])
+        else:
+            results.append(None)
     return results
+
 
 def clean_multiple(results):
     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash-8b")
@@ -260,6 +238,24 @@ def extract_countries(cleaned_results):
                 curr_countries.append(country)
         all_countries.append(("|").join(curr_countries))
     return all_countries
+
+def st_search_gdelt(q, s_date, e_date):
+    formatted_query = q.replace(" ", "%20")
+    final_query = f'{formatted_query}&sourcelang=eng&startdatetime={s_date}000000&enddatetime={e_date}000000&maxrecords=250'
+    
+    # Debugging: Print the final query
+    print("Final Query:", final_query)
+    df= None
+    try:# Execute search
+        df = search_gdelt_queries(final_query)
+    except:
+        st.warning("⚠ There was an error in the search query. Try adjusting your query or date range.")
+
+    if df is not None:
+        len_df = len(df)
+        st.info(f"🔹 Search Results: {str(len_df).zfill(3)} Articles were located. Adjust query or date range if you want to collect more.")
+    return df 
+
 
 def st_visualize_sent(df):
     dates = df["seendate"].tolist()
@@ -390,24 +386,6 @@ gdelt_search_query = gdelt_search_query.strip()
 start_date = st.date_input("Start Date").strftime("%Y%m%d")
 end_date = st.date_input("End Date").strftime("%Y%m%d")
 
-def st_search_gdelt(q, s_date, e_date):
-    formatted_query = q.replace(" ", "%20")
-    final_query = f'{formatted_query}&sourcelang=eng&startdatetime={s_date}000000&enddatetime={e_date}000000&maxrecords=250'
-    
-    # Debugging: Print the final query
-    print("Final Query:", final_query)
-    df= None
-    try:# Execute search
-        df = search_gdelt_queries(final_query)
-    except:
-        st.warning("⚠ There was an error in the search query. Try adjusting your query or date range.")
-
-    if df is not None:
-        len_df = len(df)
-        st.info(f"🔹 Search Results: {str(len_df).zfill(3)} Articles were located. Adjust query or date range if you want to collect more.")
-    return df 
-
-
 df = None
 if gdelt_search_query and start_date and end_date:
     df = st_search_gdelt(gdelt_search_query, start_date, end_date)
@@ -433,16 +411,16 @@ if proceed_with_scraping == "Yes" and st.session_state.scraped_once == False:
         # Get list of URLs
         url_list = df['url'].tolist()
 
-        # Run async scraping
-        # scrape_results = asyncio.run(scrape_multiple(url_list))
-        scrape_results = run_async_task(scrape_multiple(url_list))
-        print(scrape_results)
-
+        # Run async scraping using the existing event loop with nest_asyncio applied.
+        scrape_results = asyncio.get_event_loop().run_until_complete(scrape_multiple(url_list))
+        
+        st.info("🔄 Cleaning scraped articles...")
+        cleaned_results = clean_multiple(scrape_results)
         # loop = asyncio.new_event_loop()
         # asyncio.set_event_loop(loop)
         # scrape_results = loop.run_until_complete(scrape_multiple(url_list))
-        print("cleaning...")
-        cleaned_results = clean_multiple(scrape_results)
+        # print("cleaning...")
+        # cleaned_results = clean_multiple(scrape_results)
         print("done cleaning...")
     else:
         st.warning("⚠ No valid articles to scrape.")
