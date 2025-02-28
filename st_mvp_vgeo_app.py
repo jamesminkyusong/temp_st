@@ -11,26 +11,18 @@ from datetime import datetime, timedelta
 from gdeltdoc import Filters, near, repeat, GdeltDoc
 from crawl4ai import AsyncWebCrawler, CrawlerRunConfig, CacheMode
 import asyncio
-import nest_asyncio 
-# Apply nest_asyncio to allow nested event loops in Streamlit.
-nest_asyncio.apply()
+import threading
 
-# Helper functions to ensure a usable event loop.
-def get_or_create_event_loop():
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop
-
-def run_async(coro):
-    loop = get_or_create_event_loop()
-    return loop.run_until_complete(coro)
-
+def run_async_in_thread(coro):
+    result = []
+    def target():
+        # asyncio.run creates a new event loop, runs the coroutine, and then closes the loop.
+        res = asyncio.run(coro)
+        result.append(res)
+    thread = threading.Thread(target=target)
+    thread.start()
+    thread.join()
+    return result[0]
 
 # from langchain.document_loaders import UnstructuredMarkdownParser
 from langchain.schema import Document
@@ -430,7 +422,8 @@ if proceed_with_scraping == "Yes" and st.session_state.scraped_once == False:
         url_list = df['url'].tolist()
 
         # Run async scraping using the existing event loop with nest_asyncio applied.
-        scrape_results = run_async(scrape_multiple(url_list))
+        scrape_results = run_async_in_thread(scrape_multiple(url_list))
+
         # scrape_results = asyncio.get_event_loop().run_until_complete(scrape_multiple(url_list))
         
         st.info("🔄 Cleaning scraped articles...")
